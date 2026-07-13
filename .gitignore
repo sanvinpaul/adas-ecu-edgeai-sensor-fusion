@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Model artifacts (regenerable)
+*.joblib
+*.keras
+*.h5
+*.tflite
+threshold.json
+
+# Captured data (keep only small samples)
+**/data/*.csv
+!**/data/sample_normal.csv
+
+.DS_Store
