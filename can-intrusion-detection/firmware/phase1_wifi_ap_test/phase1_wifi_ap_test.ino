@@ -13,7 +13,7 @@
 
 #include <WiFi.h>
 
-char ssid[] = "CarInfotainment";
+char ssid[] = "CarInfotainment_san";
 char pass[] = "drive1234";     // WPA2 passwords must be 8+ characters
 WiFiServer server(80);
 

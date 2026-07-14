@@ -49,6 +49,11 @@ void setup() {
 }
 
 void loop() {
+    // Drain any incoming CAN traffic this node doesn't use, to prevent RX buffer overflow
+    while (CAN.checkReceive() == CAN_MSGAVAIL) {
+      unsigned long id; uint8_t len = 0; uint8_t buf[8];
+      CAN.readMsgBuf(&id, &len, buf);   // discarded — this node only transmits
+  }
   if (cam.grabFrame(fb, 3000) == 0) {
     uint8_t* buf = fb.getBuffer();
     int frameSize = cam.frameSize();
@@ -72,6 +77,8 @@ void loop() {
 
   // CAN controller error recovery
   if (CAN.checkError() == CAN_CTRLERROR) {
+    Serial.print("EFLG raw: 0x");
+    Serial.println(CAN.getError(), HEX);
     CAN.begin(MCP_ANY, CAN_500KBPS, MCP_8MHZ);
     CAN.setMode(MCP_NORMAL);
     delay(500);
