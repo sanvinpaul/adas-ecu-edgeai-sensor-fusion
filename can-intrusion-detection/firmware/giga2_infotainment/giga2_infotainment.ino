@@ -32,7 +32,7 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C display(U8G2_R0, U8X8_PIN_NONE);
 #define ECHO_PIN 3
 long ultrasonicDistance = 0;
 unsigned long lastUltraMillis = 0;
-const unsigned long ULTRA_INTERVAL_MS = 100;
+const unsigned long ULTRA_INTERVAL_MS = 500;
 
 // ---------- WiFi AP ----------
 char ap_ssid[] = "CarInfotainment";
@@ -186,6 +186,7 @@ void setup() {
   display.drawStr(0, 30, "Booting...");
   display.sendBuffer();
 
+  // SPI1.begin();
   if (CAN.begin(MCP_ANY, CAN_500KBPS, MCP_8MHZ) != CAN_OK) {
     Serial.println("CAN init FAILED"); while (1) {}
   }
