@@ -33,7 +33,7 @@ unsigned long lastReceiveMillis = 0;
 // Local ultrasonic
 long ultrasonicDistance = 0;
 unsigned long lastUltraMillis = 0;
-const unsigned long ULTRA_INTERVAL_MS = 100;
+const unsigned long ULTRA_INTERVAL_MS = 500;
 
 long readUltrasonic() {
   digitalWrite(TRIG_PIN, LOW);  delayMicroseconds(2);
