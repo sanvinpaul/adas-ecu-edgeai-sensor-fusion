@@ -73,6 +73,13 @@ def main():
     X_norm = np.array(frames_to_windows(csv_to_frames(args.normal)), dtype=float)
     print(f"Normal windows: {len(X_norm)}")
 
+    print("\nTraining data statistics per feature (checking for low-variance features):")
+    for i, name in enumerate(FEATURE_NAMES):
+        col = X_norm[:, i]
+        print(f"  {name:18s} mean={col.mean():8.3f}  std={col.std():8.3f}  "
+              f"min={col.min():8.3f}  max={col.max():8.3f}")
+    print()
+
     X_tr, X_val = train_test_split(X_norm, test_size=0.2, random_state=42)
 
     scaler = StandardScaler().fit(X_tr)
