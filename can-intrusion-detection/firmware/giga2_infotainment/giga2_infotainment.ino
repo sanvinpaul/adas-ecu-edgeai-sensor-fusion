@@ -203,7 +203,7 @@ void setup() {
 
 void loop() {
   // 1) Receive CAN: capture 0x101 for replay, react to 0x555 alert.
-  if (CAN.checkReceive() == CAN_MSGAVAIL) {
+  while (CAN.checkReceive() == CAN_MSGAVAIL) {
     unsigned long id; uint8_t len = 0; uint8_t buf[8];
     CAN.readMsgBuf(&id, &len, buf);
 
