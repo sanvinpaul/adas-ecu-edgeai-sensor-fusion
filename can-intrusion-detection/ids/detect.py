@@ -29,15 +29,32 @@ from features import window_features, WINDOW_SIZE, FEATURE_NAMES
 NONE, SPOOF, FLOOD, REPLAY, FUZZ = 0, 1, 2, 3, 4
 
 
-def classify(feat):
-    """Heuristic label for the anomaly (the autoencoder only says 'anomalous')."""
+def classify(feat, window):
+    """Heuristic label for the anomaly (the autoencoder only says 'anomalous').
+
+    Takes the raw window frames too (not just the feature vector) so it can
+    check for injectSpoof()'s exact payload signature directly, which is what
+    distinguishes spoof from replay -- both disrupt 0x101 timing identically
+    in feature space, so feat alone can't tell them apart.
+    """
     f = dict(zip(FEATURE_NAMES, feat))
     if f["frames_per_sec"] > 2000 or f["n_unique_ids"] <= 2 and f["count_0x101"] == 0 and f["count_0x102"] == 0:
         return FLOOD
-    if f["n_unique_ids"] >= 6 or f["id_entropy"] > 2.5:
+    # injectFuzz() sends exactly ONE random-ID frame per click, which bumps
+    # n_unique_ids from 2 to 3 -- not 6. The original >=6 threshold never
+    # realistically triggered given how the injector actually behaves.
+    if f["n_unique_ids"] >= 3 or f["id_entropy"] > 1.3:
         return FUZZ
     if f["count_0x101"] > 20 or f["iat_std_0x101"] > f["iat_mean_0x101"]:
-        return SPOOF   # includes replay; both inflate/disrupt 0x101 timing
+        # Disrupted 0x101 timing -- spoof always sends the fixed [1, 255]
+        # payload; replay re-sends a previously genuine (and thus more
+        # varied) captured payload. Check for spoof's known signature byte
+        # directly in the raw window rather than guessing from aggregates.
+        has_spoof_signature = any(
+            fr["id"] == 0x101 and len(fr.get("d", [])) >= 2 and fr["d"][1] == 255
+            for fr in window
+        )
+        return SPOOF if has_spoof_signature else REPLAY
     return SPOOF
 
 
@@ -84,7 +101,7 @@ def main():
             err = float(np.mean((X - model.predict(X, verbose=0)) ** 2))
 
             if err > threshold and (time.time() - last_alert) > args.cooldown:
-                atype = classify(feat)
+                atype = classify(feat, list(window))
                 score = min(255, int(err / threshold * 50))
                 ser.write(f"ALERT,{atype},{score}\n".encode())
                 print(f"  ANOMALY  err={err:.4f}  type={atype}  score={score}")
