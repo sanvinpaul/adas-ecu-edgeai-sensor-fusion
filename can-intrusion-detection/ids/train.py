@@ -76,6 +76,19 @@ def main():
     X_tr, X_val = train_test_split(X_norm, test_size=0.2, random_state=42)
 
     scaler = StandardScaler().fit(X_tr)
+
+    # A short, single-session capture can make a feature look far more
+    # consistent than it really is in general operation (e.g. iat_mean_0x101
+    # measured ~0.1ms std here, when tens of ms of jitter is completely
+    # normal in practice). StandardScaler divides by that tiny std, so any
+    # realistic live deviation gets amplified into an astronomical z-score.
+    # Floor each feature's scale at 2% of its own mean magnitude (with a
+    # small absolute floor for near-zero-mean features) so normalization
+    # stays proportionate instead of runaway-sensitive to under-sampled
+    # low-variance features.
+    min_scale = np.maximum(0.02 * np.abs(scaler.mean_), 1e-3)
+    scaler.scale_ = np.maximum(scaler.scale_, min_scale)
+
     X_tr_s, X_val_s = scaler.transform(X_tr), scaler.transform(X_val)
 
     ae = build_autoencoder(X_tr_s.shape[1])
