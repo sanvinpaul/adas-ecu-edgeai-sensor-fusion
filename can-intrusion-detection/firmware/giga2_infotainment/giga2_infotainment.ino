@@ -93,38 +93,45 @@ void injectFuzz() {
 
 // ---------- Web dashboard ----------
 void sendDashboard(WiFiClient& client) {
-  client.println("HTTP/1.1 200 OK");
-  client.println("Content-Type: text/html");
-  client.println("Connection: close");
-  client.println();
-  client.println("<!DOCTYPE html><html><head><meta charset='utf-8'>");
-  client.println("<meta name='viewport' content='width=device-width,initial-scale=1'>");
-  client.println("<meta http-equiv='refresh' content='2'>");   // auto-refresh to pick up alerts
-  client.println("<title>Car Infotainment</title></head><body style='font-family:sans-serif;text-align:center'>");
-  client.println("<h2>Vehicle Infotainment</h2>");
+  // Build the entire HTML body in one buffer, then send it in a single write.
+  // Many separate client.print()/println() calls each incur their own
+  // network-write latency; while a client is connected and auto-refreshing,
+  // that blocking time inside handleClient() delays the next scheduled 0x102
+  // CAN send, disrupting its timing enough to be flagged as anomalous by the
+  // IDS. Consolidating output -- and lengthening the refresh interval below
+  // -- both reduce how much this feature disrupts CAN timing.
+  String body;
+  body.reserve(900);
+  body += "<!DOCTYPE html><html><head><meta charset='utf-8'>";
+  body += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
+  body += "<meta http-equiv='refresh' content='5'>";   // was 2s -- fewer serve cycles per minute
+  body += "<title>Car Infotainment</title></head><body style='font-family:sans-serif;text-align:center'>";
+  body += "<h2>Vehicle Infotainment</h2>";
 
   if (alertActive) {
-    client.print("<div style='background:#c0392b;color:#fff;padding:16px;font-size:20px;border-radius:8px'>");
-    client.print("&#9888; INTRUSION DETECTED &mdash; ");
-    client.print(attackName(alertType));
-    client.print(" (score ");
-    client.print(alertScore);
-    client.println(")</div>");
+    body += "<div style='background:#c0392b;color:#fff;padding:16px;font-size:20px;border-radius:8px'>";
+    body += "&#9888; INTRUSION DETECTED &mdash; ";
+    body += attackName(alertType);
+    body += " (score ";
+    body += alertScore;
+    body += ")</div>";
   } else {
-    client.println("<div style='background:#27ae60;color:#fff;padding:16px;border-radius:8px'>System nominal</div>");
+    body += "<div style='background:#27ae60;color:#fff;padding:16px;border-radius:8px'>System nominal</div>";
   }
 
-  client.print("<p>Distance: ");
-  client.print(ultrasonicDistance);
-  client.println(" cm</p>");
+  body += "<p>Distance: ";
+  body += ultrasonicDistance;
+  body += " cm</p>";
 
-  // "Diagnostics" panel == the attacker's injection controls
-  client.println("<hr><h3>Diagnostics (inject test frames)</h3>");
-  client.println("<p><a href='/inject/spoof'>Spoof 0x101</a> | ");
-  client.println("<a href='/inject/flood'>Flood 0x000</a> | ");
-  client.println("<a href='/inject/replay'>Replay</a> | ");
-  client.println("<a href='/inject/fuzz'>Fuzz</a></p>");
-  client.println("</body></html>");
+  body += "<hr><h3>Diagnostics (inject test frames)</h3>";
+  body += "<p><a href='/inject/spoof'>Spoof 0x101</a> | ";
+  body += "<a href='/inject/flood'>Flood 0x000</a> | ";
+  body += "<a href='/inject/replay'>Replay</a> | ";
+  body += "<a href='/inject/fuzz'>Fuzz</a></p>";
+  body += "</body></html>";
+
+  client.print("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n");
+  client.print(body);
 }
 
 void handleClient() {
