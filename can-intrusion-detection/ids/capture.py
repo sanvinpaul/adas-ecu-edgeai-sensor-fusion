@@ -37,6 +37,7 @@ def main():
         w = csv.writer(fh)
         w.writerow(["t", "id", "dlc"] + [f"d{i}" for i in range(8)] + ["label"])
         n = 0
+        skipped = 0
         try:
             while True:
                 line = ser.readline().decode(errors="ignore").strip()
@@ -45,15 +46,19 @@ def main():
                 try:
                     f = json.loads(line)
                 except json.JSONDecodeError:
+                    skipped += 1
+                    continue
+                if not all(k in f for k in ("t", "id", "dlc")):
+                    skipped += 1
                     continue
                 data = f.get("d", [])
                 data = (data + [0] * 8)[:8]
                 w.writerow([f["t"], f["id"], f["dlc"]] + data + [args.label])
                 n += 1
                 if n % 200 == 0:
-                    print(f"  {n} frames", end="\r")
+                    print(f"  {n} frames ({skipped} skipped)", end="\r")
         except KeyboardInterrupt:
-            print(f"\nStopped. Wrote {n} frames.")
+            print(f"\nStopped. Wrote {n} frames ({skipped} malformed frames skipped).")
 
 
 if __name__ == "__main__":
