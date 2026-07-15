@@ -88,6 +88,10 @@ def main():
                 score = min(255, int(err / threshold * 50))
                 ser.write(f"ALERT,{atype},{score}\n".encode())
                 print(f"  ANOMALY  err={err:.4f}  type={atype}  score={score}")
+                resid = (X - model.predict(X, verbose=0))[0] ** 2
+                top = sorted(zip(FEATURE_NAMES, resid), key=lambda kv: -kv[1])[:3]
+                print("    top contributors: " + ", ".join(f"{n}={v:.2f}" for n, v in top))
+                print("    raw feature vector: " + ", ".join(f"{n}={round(x,2)}" for n, x in zip(FEATURE_NAMES, feat)))
                 last_alert = time.time()
     except KeyboardInterrupt:
         print("\nStopped.")
