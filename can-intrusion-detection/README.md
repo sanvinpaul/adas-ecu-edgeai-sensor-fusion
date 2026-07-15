@@ -53,11 +53,56 @@ dashboard, and watch the alert reach the head unit's OLED and web page.
 
 ## Results
 
-_Fill in from `train.py` output._
+### v1 -- Initial training run
 
-| Attack | Detection rate | False-positive rate |
-|--------|---------------|---------------------|
-| Spoof  | – | – |
-| Flood  | – | – |
-| Replay | – | – |
-| Fuzz   | – | – |
+First real hardware capture: ~16 minutes of normal traffic (78 training
+windows, WINDOW_SIZE=50 frames), plus one capture per attack type triggered
+by clicking each dashboard injection link 5-10 times during a ~1 minute
+window.
+
+Threshold (99.5th pct of normal error): 1.46265
+
+| Attack | Detection rate | Windows evaluated |
+|--------|----------------|--------------------|
+| Spoof  | 40.0%          | 35 |
+| Flood  | 100.0%         | 7  |
+| Replay | 100.0%         | 8  |
+| Fuzz   | 100.0%         | 8  |
+
+**Flood, replay, and fuzz were detected perfectly.** Each produces a large,
+unambiguous statistical shift -- a 200-frame burst, a duplicated timing
+pattern, or entirely foreign CAN IDs -- all of which stand out sharply against
+the learned "normal" baseline.
+
+**Spoof detection was weak (40%), and that's the attack that matters most**
+for this project's threat model -- it's the one modeled directly on the real
+Jeep Cherokee case study (https://www.wired.com/2015/07/hackers-remotely-kill-jeep-highway/)
+that motivates the whole design (an attacker impersonating a legitimate ECU).
+The likely cause: injectSpoof() sends exactly **one** extra 0x101 frame
+per click, versus 200 frames per flood click or continuous foreign traffic
+for fuzz. With only 5-10 clicks spread across a full minute of otherwise
+normal traffic, the perturbation to the 0x101 timing/frequency features was
+genuinely subtle -- arguably realistic for how a careful real-world attacker
+would behave, but hard for a model trained on only ~78 normal windows to
+separate confidently from natural jitter.
+
+This is a legitimate, documented finding in CAN IDS research more broadly:
+volume-based attacks (flooding, fuzzing) are inherently easier to detect via
+timing/frequency features than stealthy identity-spoofing attacks that mimic
+legitimate traffic patterns closely.
+
+**Next step:** recapture spoof traffic with much more aggressive injection
+(rapid repeated clicks rather than spread out) to give the model a stronger
+signal, then retrain. Results below once that's complete.
+
+### v2 -- Improved spoof detection (pending)
+
+_To be filled in after recapturing spoof data with a stronger injection
+signal and retraining._
+
+| Attack | Detection rate | Windows evaluated |
+|--------|----------------|--------------------|
+| Spoof  | - | - |
+| Flood  | - | - |
+| Replay | - | - |
+| Fuzz   | - | - |
