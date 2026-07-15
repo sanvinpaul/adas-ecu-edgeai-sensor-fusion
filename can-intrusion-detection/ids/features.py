@@ -28,8 +28,42 @@ FEATURE_NAMES = (
 )
 
 
+def _unwrap_timestamps(frames):
+    """Return frames with 't' corrected for 32-bit micros() rollover.
+
+    Arduino's micros() is a 32-bit unsigned counter that wraps to 0 every
+    ~71.6 minutes. Across a long-running detect.py session this can happen
+    mid-window. Walking frames in their natural arrival order and adding
+    2**32 to a running offset whenever a large backward jump is seen produces
+    a monotonically non-decreasing timestamp sequence for all downstream math
+    (this also makes the previous "sort by raw value" step both unnecessary
+    and actively wrong across a rollover boundary, since sorting raw values
+    puts small post-rollover numbers before the large pre-rollover numbers
+    they actually came after).
+    """
+    if not frames:
+        return frames
+    UINT32 = 2**32
+    ROLLOVER_THRESHOLD = 2**31   # a backward jump bigger than this = rollover
+    unwrapped = []
+    offset = 0
+    prev_raw = frames[0]["t"]
+    for f in frames:
+        raw = f["t"]
+        if raw < prev_raw - ROLLOVER_THRESHOLD:
+            offset += UINT32
+        prev_raw = raw
+        g = dict(f)
+        g["t"] = raw + offset
+        unwrapped.append(g)
+    return unwrapped
+
+
 def _inter_arrival_stats(times_us):
-    """Mean/std of gaps (in ms) between consecutive timestamps for one ID."""
+    """Mean/std of gaps (in ms) between consecutive timestamps for one ID.
+    Expects times_us already in correct chronological (arrival) order --
+    do not sort by raw value, since that breaks across a rollover boundary.
+    """
     if len(times_us) < 2:
         return 0.0, 0.0
     gaps = [(times_us[i] - times_us[i - 1]) / 1000.0 for i in range(1, len(times_us))]
@@ -40,6 +74,8 @@ def _inter_arrival_stats(times_us):
 
 def window_features(frames):
     """Turn a list of frame dicts (one window) into a fixed-length feature list."""
+    frames = _unwrap_timestamps(frames)   # rollover-safe timestamps for everything below
+
     per_id_times = defaultdict(list)
     per_id_last_payload = {}
     payload_deltas = []
@@ -65,7 +101,7 @@ def window_features(frames):
         feats.append(id_counts.get(tid, 0))
 
     # Per-tracked-ID: inter-arrival mean and std (ms)
-    iat = {tid: _inter_arrival_stats(sorted(per_id_times.get(tid, []))) for tid in TRACKED_IDS}
+    iat = {tid: _inter_arrival_stats(per_id_times.get(tid, [])) for tid in TRACKED_IDS}
     for tid in TRACKED_IDS:
         feats.append(iat[tid][0])
     for tid in TRACKED_IDS:
