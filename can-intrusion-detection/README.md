@@ -170,6 +170,71 @@ granularity mismatch** between file-level attack labels and per-window ground
 truth. That's arguably a more valuable finding than a clean 100% number would
 have been on its own.
 
+### v3 -- Firmware fix + fresh baseline (root cause resolved)
+
+Live detection (`detect.py`) surfaced a third issue not visible in offline
+training/evaluation at all: near-continuous low-grade false alarms whenever a
+WiFi client was connected to the dashboard, and silence when it wasn't. Two
+causes were found and fixed in sequence:
+
+1. **32-bit `micros()` rollover** -- after an extended `detect.py` session,
+   Arduino's 32-bit microsecond counter wrapped, and sorting timestamps by
+   raw value (the original implementation) broke across that boundary,
+   producing single gaps of ~4.29 million ms and reconstruction errors in the
+   tens of thousands. Fixed in `features.py` by unwrapping timestamps in
+   natural arrival order instead of sorting by value.
+2. **WiFi-serving jitter** -- the dashboard's auto-refresh (originally every
+   2s) triggered `handleClient()`, which made ~15 separate blocking network
+   writes to build the HTML response. That blocking time delayed the next
+   scheduled `0x102` CAN send, disrupting timing the model had only ever seen
+   as precise. This was a genuine train/serve mismatch: `normal.csv` had been
+   captured with the dashboard idle, not reflecting real operating conditions
+   (the dashboard has to be open to test attacks).
+
+The second issue was deliberately fixed at the **firmware level** rather than
+by retraining the model to tolerate the jitter. The disrupted features
+(`iat_mean`/`iat_std` for `0x101` and `0x102`) are the exact features
+spoof/replay attacks manifest through -- broadening "normal" to include
+timing jitter risked desensitizing the model to the real attacks this
+feature exists to catch. `sendDashboard()` was consolidated into a single
+buffered write and the refresh interval lengthened to 5s, both reducing how
+much and how often serving disrupts CAN timing.
+
+A fresh `normal.csv` was then captured **with the dashboard open** (matching
+real operating conditions) and the ultrasonic sensor allowed to vary
+naturally, rather than sitting artificially static -- a model trained on zero
+payload variation would flag legitimate real-world movement as anomalous.
+
+```
+Threshold (99.5th pct of normal error): 22.57849   [v2 was 1.22123]
+  attack_spoof.csv:  15.9% (44 windows)   [naive, file-level label]
+  attack_flood.csv:  100.0% (7 windows)
+  attack_replay.csv: 100.0% (8 windows)
+  attack_fuzz.csv:   100.0% (8 windows)
+```
+
+Corrected per-window ground truth (diagnose_spoof_labels.py) against the new
+model:
+
+```
+Corrected detection rate (recall on TRUE attack windows only): 7/7 = 100.0%
+False alarm rate on windows mislabeled "spoof" but actually clean: 0/37 = 0.0%
+```
+
+| Metric | v2 | v3 |
+|--------|----|----|
+| Threshold | 1.22 | 22.58 |
+| Spoof detection (true-attack windows) | 100.0% (7/7) | **100.0% (7/7)** |
+| False alarms on mislabeled-clean windows | 27.0% (10/37) | **0.0% (0/37)** |
+| Flood / Replay / Fuzz | 100% | 100% |
+
+**Fixing the root cause rather than retraining around it preserved full
+attack sensitivity while eliminating false alarms from normal operation.**
+Had the jitter simply been tolerated via retraining alone (without knowing
+whether that traded away sensitivity), there would have been no way to
+distinguish "the model got more robust" from "the model got less alert" --
+the corrected per-window metric is what makes that distinction possible.
+
 ### Roadmap
 
 - Capture ground truth at the frame level (e.g. have the firmware stamp
