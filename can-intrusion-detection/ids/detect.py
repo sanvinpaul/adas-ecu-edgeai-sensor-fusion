@@ -65,9 +65,12 @@ def main():
             if not line.startswith("{") or '"id"' not in line:
                 continue
             try:
-                window.append(json.loads(line))
+                f = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not all(k in f for k in ("t", "id", "dlc")):
+                continue
+            window.append(f)
 
             if len(window) < WINDOW_SIZE:
                 continue
