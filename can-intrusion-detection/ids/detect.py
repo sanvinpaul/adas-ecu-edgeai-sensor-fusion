@@ -63,6 +63,10 @@ def main():
     ap.add_argument("--port", required=True)
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--cooldown", type=float, default=3.0, help="seconds between alerts")
+    ap.add_argument("--dry-run", action="store_true",
+                     help="compute and print anomalies but never write ALERT back to the "
+                          "serial port -- isolates whether the write itself disrupts CAN "
+                          "frame timing on the Uno Q")
     args = ap.parse_args()
 
     model = keras.models.load_model("model.keras")
@@ -103,8 +107,10 @@ def main():
             if err > threshold and (time.time() - last_alert) > args.cooldown:
                 atype = classify(feat, list(window))
                 score = min(255, int(err / threshold * 50))
-                ser.write(f"ALERT,{atype},{score}\n".encode())
-                print(f"  ANOMALY  err={err:.4f}  type={atype}  score={score}")
+                if not args.dry_run:
+                    ser.write(f"ALERT,{atype},{score}\n".encode())
+                print(f"  ANOMALY  err={err:.4f}  type={atype}  score={score}"
+                      + ("  [dry-run, no write sent]" if args.dry_run else ""))
                 resid = (X - model.predict(X, verbose=0))[0] ** 2
                 top = sorted(zip(FEATURE_NAMES, resid), key=lambda kv: -kv[1])[:3]
                 print("    top contributors: " + ", ".join(f"{n}={v:.2f}" for n, v in top))
