@@ -45,7 +45,12 @@ def classify(feat, window):
     # realistically triggered given how the injector actually behaves.
     if f["n_unique_ids"] >= 3 or f["id_entropy"] > 1.3:
         return FUZZ
-    if f["count_0x101"] > 20 or f["iat_std_0x101"] > f["iat_mean_0x101"]:
+    # Thresholds grounded in observed training data (two independent capture
+    # sessions): count_0x101 never exceeded 27, iat_std_0x101 never exceeded
+    # ~6.6ms. The original ">20" / "std > mean" checks were both essentially
+    # always-true or always-false under real traffic, causing nearly every
+    # anomaly (regardless of actual cause) to get labeled SPOOF/REPLAY.
+    if f["count_0x101"] > 30 or f["iat_std_0x101"] > 15:
         # Disrupted 0x101 timing -- spoof always sends the fixed [1, 255]
         # payload; replay re-sends a previously genuine (and thus more
         # varied) captured payload. Check for spoof's known signature byte
