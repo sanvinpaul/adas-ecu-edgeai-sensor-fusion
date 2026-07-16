@@ -38,7 +38,17 @@ def classify(feat, window):
     in feature space, so feat alone can't tell them apart.
     """
     f = dict(zip(FEATURE_NAMES, feat))
-    if f["frames_per_sec"] > 2000 or f["n_unique_ids"] <= 2 and f["count_0x101"] == 0 and f["count_0x102"] == 0:
+    # injectFlood() sends 200 frames of 0x000 in a fast burst that usually
+    # completes in well under a second -- but the 50-frame scoring window
+    # covers ~12.5s of normal-rate traffic, so most scored windows only catch
+    # a partial slice of that burst mixed with regular 0x101/0x102 traffic,
+    # not a pure >2000fps torrent. Count frames that aren't the two known
+    # legitimate IDs directly: many of them (bulk foreign-ID traffic) means
+    # flood; the old frames_per_sec-only check missed this diluted case and
+    # fell through to the FUZZ branch instead, since both share the trait of
+    # introducing an unexpected ID.
+    other_count = sum(1 for fr in window if fr["id"] not in (0x101, 0x102))
+    if f["frames_per_sec"] > 2000 or other_count > 10:
         return FLOOD
     # injectFuzz() sends exactly ONE random-ID frame per click, which bumps
     # n_unique_ids from 2 to 3 -- not 6. The original >=6 threshold never
