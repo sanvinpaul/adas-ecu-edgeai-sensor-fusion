@@ -38,17 +38,20 @@ def classify(feat, window):
     in feature space, so feat alone can't tell them apart.
     """
     f = dict(zip(FEATURE_NAMES, feat))
-    # injectFlood() sends 200 frames of 0x000 in a fast burst that usually
-    # completes in well under a second -- but the 50-frame scoring window
-    # covers ~12.5s of normal-rate traffic, so most scored windows only catch
-    # a partial slice of that burst mixed with regular 0x101/0x102 traffic,
-    # not a pure >2000fps torrent. Count frames that aren't the two known
-    # legitimate IDs directly: many of them (bulk foreign-ID traffic) means
-    # flood; the old frames_per_sec-only check missed this diluted case and
-    # fell through to the FUZZ branch instead, since both share the trait of
-    # introducing an unexpected ID.
-    other_count = sum(1 for fr in window if fr["id"] not in (0x101, 0x102))
-    if f["frames_per_sec"] > 2000 or other_count > 10:
+    # injectFlood() sends 200 frames of 0x000 in a fast burst -- but real
+    # testing showed most of that burst never reaches Python at all: CAN
+    # frames arrive roughly every ~260us at 500kbps, while printing one JSON
+    # line over serial takes several milliseconds, so the Uno Q can't keep up
+    # and drops most flood frames at the CAN-controller level. What survives
+    # to a scored window is often just 1-2 frames -- volume-based detection
+    # (counting foreign-ID frames) can't reliably distinguish that from a
+    # single fuzz click. Instead, check for the specific ID directly:
+    # injectFlood() always targets exactly 0x000, while injectFuzz() picks a
+    # random ID across 0-0x7FF (only a 1-in-2048 chance of ever coinciding
+    # with 0x000), so presence of 0x000 at all is a reliable flood signature
+    # regardless of how many frames actually survived the pipeline.
+    has_flood_id = any(fr["id"] == 0x000 for fr in window)
+    if f["frames_per_sec"] > 2000 or has_flood_id:
         return FLOOD
     # injectFuzz() sends exactly ONE random-ID frame per click, which bumps
     # n_unique_ids from 2 to 3 -- not 6. The original >=6 threshold never
