@@ -145,12 +145,25 @@ void handleClient() {
   int e = reqLine.indexOf(' ', s + 1);
   String path = (s >= 0 && e > s) ? reqLine.substring(s + 1, e) : "/";
 
-  if      (path == "/inject/spoof")  injectSpoof();
-  else if (path == "/inject/flood")  injectFlood();
-  else if (path == "/inject/replay") injectReplay();
-  else if (path == "/inject/fuzz")   injectFuzz();
+  bool isInject = (path == "/inject/spoof" || path == "/inject/flood" ||
+                    path == "/inject/replay" || path == "/inject/fuzz");
 
-  sendDashboard(client);
+  if (isInject) {
+    if      (path == "/inject/spoof")  injectSpoof();
+    else if (path == "/inject/flood")  injectFlood();
+    else if (path == "/inject/replay") injectReplay();
+    else if (path == "/inject/fuzz")   injectFuzz();
+
+    // Post/Redirect/Get: send the browser back to "/" instead of serving
+    // content directly at the /inject/* URL. Otherwise the browser's address
+    // bar stays on e.g. /inject/spoof, and a later page refresh silently
+    // re-sends that exact request -- re-triggering the same injection with
+    // no click at all.
+    client.print("HTTP/1.1 303 See Other\r\nLocation: /\r\nConnection: close\r\n\r\n");
+  } else {
+    sendDashboard(client);
+  }
+
   delay(2);
   client.stop();
 }
