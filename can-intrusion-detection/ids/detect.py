@@ -26,7 +26,7 @@ from tensorflow import keras
 from features import window_features, WINDOW_SIZE, FEATURE_NAMES
 
 # Attack-type codes shared with the firmware.
-NONE, SPOOF, FLOOD, REPLAY, FUZZ = 0, 1, 2, 3, 4
+NONE, SPOOF, FLOOD, REPLAY, FUZZ, UNKNOWN = 0, 1, 2, 3, 4, 5
 
 
 def classify(feat, window):
@@ -73,7 +73,14 @@ def classify(feat, window):
             for fr in window
         )
         return SPOOF if has_spoof_signature else REPLAY
-    return SPOOF
+    # None of the above matched -- this is a real, model-flagged anomaly
+    # (e.g. mean_payload_delta spiking from rapid ultrasonic variation like
+    # fast hand-waving, well beyond anything in training) but it doesn't
+    # match any known attack's signature. Labeling it SPOOF by default was
+    # actively misleading; UNKNOWN is honest about what the heuristic
+    # actually knows here -- the autoencoder detected something abnormal,
+    # but classify() can't identify it as a specific attack type.
+    return UNKNOWN
 
 
 def main():

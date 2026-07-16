@@ -41,7 +41,7 @@ WiFiServer server(80);
 
 // ---------- Alert state (set when 0x555 received) ----------
 bool alertActive = false;
-uint8_t alertType = 0;              // 0=none 1=spoof 2=flood 3=replay 4=fuzz
+uint8_t alertType = 0;              // 0=none 1=spoof 2=flood 3=replay 4=fuzz 5=unknown
 uint8_t alertScore = 0;
 unsigned long alertUntil = 0;       // auto-clear timestamp
 
@@ -56,6 +56,7 @@ const char* attackName(uint8_t t) {
     case 2: return "FLOOD";
     case 3: return "REPLAY";
     case 4: return "FUZZ";
+    case 5: return "UNKNOWN";
     default: return "-";
   }
 }
