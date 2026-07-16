@@ -17,11 +17,15 @@
 
 #include <SPI.h>
 #include <mcp_can.h>
+#include <string.h>
+#include <stdlib.h>
 
 #define CAN_CS 10
 MCP_CAN CAN(CAN_CS);
 
-String cmd;
+#define CMD_BUF_SIZE 32
+char cmdBuf[CMD_BUF_SIZE];
+uint8_t cmdLen = 0;
 
 void broadcastAlert(uint8_t type, uint8_t score) {
   uint8_t p[3] = { 1, type, score };
@@ -29,22 +33,29 @@ void broadcastAlert(uint8_t type, uint8_t score) {
 }
 
 void handleSerialCommand() {
+  // Fixed-size buffer, no String/heap allocation. detect.py's --dry-run
+  // testing proved that a String-based version of this (cmd += c on every
+  // character) could disrupt CAN frame forwarding timing -- Arduino String
+  // concatenation reallocates on the heap, and after hours of continuous
+  // uptime with repeated alert processing, fragmentation could cause
+  // unpredictable stalls right here, delaying the CAN receive loop above.
   while (Serial.available()) {
     char c = Serial.read();
     if (c == '\n') {
+      cmdBuf[cmdLen] = '\0';
       // Expect: ALERT,<type>,<score>
-      if (cmd.startsWith("ALERT")) {
-        int c1 = cmd.indexOf(',');
-        int c2 = cmd.indexOf(',', c1 + 1);
-        if (c1 > 0 && c2 > c1) {
-          uint8_t type  = cmd.substring(c1 + 1, c2).toInt();
-          uint8_t score = cmd.substring(c2 + 1).toInt();
+      if (strncmp(cmdBuf, "ALERT", 5) == 0) {
+        char* p1 = strchr(cmdBuf, ',');
+        char* p2 = p1 ? strchr(p1 + 1, ',') : nullptr;
+        if (p1 && p2) {
+          uint8_t type  = (uint8_t)atoi(p1 + 1);
+          uint8_t score = (uint8_t)atoi(p2 + 1);
           broadcastAlert(type, score);
         }
       }
-      cmd = "";
-    } else if (c != '\r') {
-      cmd += c;
+      cmdLen = 0;
+    } else if (c != '\r' && cmdLen < CMD_BUF_SIZE - 1) {
+      cmdBuf[cmdLen++] = c;
     }
   }
 }
