@@ -52,8 +52,8 @@ def main():
     print(f"Profile job status: {profile_job.get_status()}")
 
     print("\nView full results (including latency, memory, NPU utilization) at:")
-    print(f"  Compile job: https://aihub.qualcomm.com/jobs/{compile_job.job_id}")
-    print(f"  Profile job: https://aihub.qualcomm.com/jobs/{profile_job.job_id}")
+    print(f"  Compile job: https://workbench.aihub.qualcomm.com/jobs/{compile_job.job_id}/")
+    print(f"  Profile job: https://workbench.aihub.qualcomm.com/jobs/{profile_job.job_id}/")
 
 
 if __name__ == "__main__":
