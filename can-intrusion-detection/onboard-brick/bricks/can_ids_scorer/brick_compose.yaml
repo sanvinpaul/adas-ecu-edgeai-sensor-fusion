@@ -1,0 +1,5 @@
+services:
+  can_ids_scorer:
+    build:
+      context: .
+      dockerfile: Dockerfile

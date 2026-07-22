@@ -1,11 +1,10 @@
 """
-detect.py -- live CAN intrusion detection on the Uno Q Linux side.
+detect.py -- live CAN intrusion detection on the Uno Q Linux side, laptop-
+tethered mode (reads over USB serial).
 
-Reads the per-frame JSON stream from the MCU forwarder, maintains a rolling
-window, computes features, and runs the trained autoencoder. When the
-reconstruction error exceeds the learned threshold, it flags an intrusion and
-sends "ALERT,<type>,<score>" back to the MCU, which broadcasts frame 0x555 so the
-infotainment head unit warns the driver.
+This is now a thin CLI wrapper around ids_core.IDSScorer -- the actual
+model-loading, scoring, and classification logic lives in ids_core.py, shared
+with the on-device Custom Brick, so the two can never silently drift apart.
 
 Usage:
     python detect.py --port /dev/ttyACM0
@@ -18,69 +17,10 @@ import collections
 import json
 import time
 
-import joblib
-import numpy as np
 import serial
-from tensorflow import keras
 
-from features import window_features, WINDOW_SIZE, FEATURE_NAMES
-
-# Attack-type codes shared with the firmware.
-NONE, SPOOF, FLOOD, REPLAY, FUZZ, UNKNOWN = 0, 1, 2, 3, 4, 5
-
-
-def classify(feat, window):
-    """Heuristic label for the anomaly (the autoencoder only says 'anomalous').
-
-    Takes the raw window frames too (not just the feature vector) so it can
-    check for injectSpoof()'s exact payload signature directly, which is what
-    distinguishes spoof from replay -- both disrupt 0x101 timing identically
-    in feature space, so feat alone can't tell them apart.
-    """
-    f = dict(zip(FEATURE_NAMES, feat))
-    # injectFlood() sends 200 frames of 0x000 in a fast burst -- but real
-    # testing showed most of that burst never reaches Python at all: CAN
-    # frames arrive roughly every ~260us at 500kbps, while printing one JSON
-    # line over serial takes several milliseconds, so the Uno Q can't keep up
-    # and drops most flood frames at the CAN-controller level. What survives
-    # to a scored window is often just 1-2 frames -- volume-based detection
-    # (counting foreign-ID frames) can't reliably distinguish that from a
-    # single fuzz click. Instead, check for the specific ID directly:
-    # injectFlood() always targets exactly 0x000, while injectFuzz() picks a
-    # random ID across 0-0x7FF (only a 1-in-2048 chance of ever coinciding
-    # with 0x000), so presence of 0x000 at all is a reliable flood signature
-    # regardless of how many frames actually survived the pipeline.
-    has_flood_id = any(fr["id"] == 0x000 for fr in window)
-    if f["frames_per_sec"] > 2000 or has_flood_id:
-        return FLOOD
-    # injectFuzz() sends exactly ONE random-ID frame per click, which bumps
-    # n_unique_ids from 2 to 3 -- not 6. The original >=6 threshold never
-    # realistically triggered given how the injector actually behaves.
-    if f["n_unique_ids"] >= 3 or f["id_entropy"] > 1.3:
-        return FUZZ
-    # Thresholds grounded in observed training data (two independent capture
-    # sessions): count_0x101 never exceeded 27, iat_std_0x101 never exceeded
-    # ~6.6ms. The original ">20" / "std > mean" checks were both essentially
-    # always-true or always-false under real traffic, causing nearly every
-    # anomaly (regardless of actual cause) to get labeled SPOOF/REPLAY.
-    if f["count_0x101"] > 30 or f["iat_std_0x101"] > 15:
-        # Disrupted 0x101 timing -- spoof always sends the fixed [1, 255]
-        # payload; replay re-sends a previously genuine (and thus more
-        # varied) captured payload. Check for spoof's known signature byte
-        # directly in the raw window rather than guessing from aggregates.
-        has_spoof_signature = any(
-            fr["id"] == 0x101 and len(fr.get("d", [])) >= 2 and fr["d"][1] == 255
-            for fr in window
-        )
-        return SPOOF if has_spoof_signature else REPLAY
-    # None of the above matched -- this is a real, model-flagged anomaly
-    # (e.g. mean_payload_delta spiking from rapid ultrasonic variation like
-    # fast hand-waving, well beyond anything in training) but it doesn't
-    # match any known attack's signature. Labeling it SPOOF by default was
-    # actively misleading; UNKNOWN is honest about what the heuristic
-    # actually knows here -- the autoencoder detected something abnormal,
-    # but classify() can't identify it as a specific attack type.
-    return UNKNOWN
+from features import WINDOW_SIZE, FEATURE_NAMES
+from ids_core import IDSScorer, ATTACK_NAMES
 
 
 def main():
@@ -94,10 +34,8 @@ def main():
                           "frame timing on the Uno Q")
     args = ap.parse_args()
 
-    model = keras.models.load_model("model.keras")
-    scaler = joblib.load("scaler.joblib")
-    threshold = json.load(open("threshold.json"))["threshold"]
-    print(f"Loaded model. Threshold = {threshold:.5f}")
+    scorer = IDSScorer()
+    print(f"Loaded model. Threshold = {scorer.threshold:.5f}")
 
     ser = serial.Serial(args.port, args.baud, timeout=1)
     window = collections.deque(maxlen=WINDOW_SIZE)
@@ -116,28 +54,27 @@ def main():
                 continue
             if not all(k in f for k in ("t", "id", "dlc")):
                 continue
+            if f["id"] == 0x555:
+                continue
             window.append(f)
 
             if len(window) < WINDOW_SIZE:
                 continue
 
             n += 1
-            if n % 10:            # score every 10th frame to keep it light
+            if n % 10:
                 continue
 
-            feat = window_features(list(window))
-            X = scaler.transform([feat])
-            err = float(np.mean((X - model.predict(X, verbose=0)) ** 2))
+            frames = list(window)
+            is_anomaly, err, atype, feat = scorer.score_window(frames)
 
-            if err > threshold and (time.time() - last_alert) > args.cooldown:
-                atype = classify(feat, list(window))
-                score = min(255, int(err / threshold * 50))
+            if is_anomaly and (time.time() - last_alert) > args.cooldown:
+                score = min(255, int(err / scorer.threshold * 50))
                 if not args.dry_run:
                     ser.write(f"ALERT,{atype},{score}\n".encode())
-                print(f"  ANOMALY  err={err:.4f}  type={atype}  score={score}"
+                print(f"  ANOMALY  err={err:.4f}  type={atype} ({ATTACK_NAMES[atype]})  score={score}"
                       + ("  [dry-run, no write sent]" if args.dry_run else ""))
-                resid = (X - model.predict(X, verbose=0))[0] ** 2
-                top = sorted(zip(FEATURE_NAMES, resid), key=lambda kv: -kv[1])[:3]
+                top = scorer.top_contributors(feat)
                 print("    top contributors: " + ", ".join(f"{n}={v:.2f}" for n, v in top))
                 print("    raw feature vector: " + ", ".join(f"{n}={round(x,2)}" for n, x in zip(FEATURE_NAMES, feat)))
                 last_alert = time.time()
