@@ -235,6 +235,79 @@ whether that traded away sensitivity), there would have been no way to
 distinguish "the model got more robust" from "the model got less alert" --
 the corrected per-window metric is what makes that distinction possible.
 
+## On-device deployment
+
+Two parallel efforts to run this model on real edge/automotive hardware,
+rather than only a development laptop.
+
+### Qualcomm AI Hub — NPU benchmarking (✅ complete, verified)
+
+The trained autoencoder (`model.keras`) was converted to ONNX
+(`convert_to_onnx.py`) — Qualcomm AI Hub's `submit_compile_job()` only
+accepts PyTorch or ONNX models, not native Keras. The conversion was
+numerically verified before use: the ONNX model's output matched the
+original Keras model exactly (max absolute difference `0.0`) on a test
+input.
+
+The model was then compiled and profiled on a real, hosted **SA8775P ADP**
+(Qualcomm Snapdragon Ride automotive SoC) via `submit_to_aihub.py`:
+
+```
+Device:            SA8775P ADP (Qualcomm® SA8775P), Android 14
+Input:              float32[1, 10]
+Status:             SUCCESS (compile + profile)
+Inference time:     0.2 ms (minimum / median)
+Peak memory:        0 - 18 MB
+NPU placement:      4/4 layers (100%) -- "Model is fully delegated=true"
+                     in the raw runtime log, zero CPU fallback
+Compute cycles:     3,736 total across all 4 layers (~2 us of raw NPU math)
+Delegate overhead:  ~413 us (QNN/HTP pipeline dispatch)
+```
+
+**Comparison to development hardware:** 0.2 ms on the SA8775P's NPU vs.
+14.68 ms (median) on a laptop CPU — roughly a **73x** speedup on dedicated
+automotive NPU silicon.
+
+**Notable finding:** the actual NPU computation for this model is only ~2 us
+(3,736 compute cycles); the ~413 us `TfLiteQnnDelegate` dispatch step
+dominates total latency. For a model this small, NPU invocation overhead is
+the real bottleneck, not compute -- meaning a meaningfully larger/more
+complex model could likely run with a similar latency profile, since the
+fixed dispatch cost, not FLOPs, is what's being paid here.
+
+**Known discrepancy, documented rather than hidden:** the AI Hub dashboard
+labels the target device "SA8775P ADP," but the raw runtime log's own
+Android system properties self-report differently
+(`ro.soc.model = SA8255P`, `Detected Qualcomm SOC=SA8255`). Both chips are
+part of the same Snapdragon Ride/Cockpit family; this is very plausibly a
+shared reference/development platform used across closely related silicon
+variants, but that explanation isn't independently confirmed.
+
+### App Lab Custom Brick — on-device Uno Q deployment (🚧 in progress)
+
+Separately, the same detection logic (`ids_core.py`) was adapted into an
+Arduino App Lab Custom Brick, intended to run the full IDS natively on the
+Uno Q's own Linux side -- no laptop, no external serial tether -- using
+`Bridge.call()`/`Bridge.provide()` RPC instead of raw serial parsing (see
+`onboard-brick/`).
+
+**Status so far:**
+- Sketch compiles and flashes successfully (10% program storage, 12% dynamic
+  memory used).
+- The Brick's Docker container builds successfully (TensorFlow and all
+  dependencies install cleanly).
+- Both containers (`can_ids_scorer` and `main`) start.
+- **Runtime errors occur during App Lab's "Run"** that haven't been
+  root-caused yet -- the Brick does not yet reliably reach a confirmed
+  working state end-to-end. Two known open uncertainties going in: whether
+  `Bridge.call()`'s multi-argument form (used to push each CAN frame's ID,
+  length, and 8 data bytes) is actually supported the way it's written, or
+  needs packing into a single argument instead; and whether the shared
+  modules' import path within the Brick's sandboxed environment is correct.
+
+This is left as an open item rather than a completed feature -- unlike the
+AI Hub results above, this has not yet been verified working on hardware.
+
 ### Roadmap
 
 - Capture ground truth at the frame level (e.g. have the firmware stamp
